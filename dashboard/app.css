@@ -1,0 +1,200 @@
+/* Token Launch Radar — dark terminal. One palette, one type scale, no framework. */
+:root {
+  --bg: #0b0f14;
+  --panel: #11161d;
+  --panel2: #151c26;
+  --line: #232d3a;
+  --text: #d7dee8;
+  --muted: #8b98a9;
+  --dim: #5b6a7d;
+  --accent: #4ade80;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0 auto;
+  max-width: 1240px;
+  padding: 20px 20px 40px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+h1, h2, .num, th, .formula { font-family: var(--mono); }
+h1 { margin: 0; font-size: 22px; letter-spacing: 0.14em; color: var(--text); }
+h1::before { content: "▸ "; color: var(--accent); }
+h2 { margin: 0 0 6px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.sub { margin: 6px 0 0; color: var(--muted); max-width: 860px; }
+.top { display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between; align-items: flex-start; }
+.brand { flex: 1 1 420px; }
+.stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.stat {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 14px;
+  min-width: 118px;
+}
+.stat .k { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-family: var(--mono); font-size: 19px; margin-top: 2px; }
+.stat .v.good { color: var(--accent); }
+.method {
+  margin-top: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.method p { margin: 8px 0; color: var(--text); }
+.method .note { color: var(--muted); font-size: 13px; }
+.formula { font-size: 15px; color: var(--accent); }
+.tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.fit { display: flex; flex-wrap: wrap; gap: 8px 22px; font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+.fit b { color: var(--text); font-weight: 600; }
+.tabs { display: flex; gap: 6px; margin-top: 18px; }
+.tabs button {
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 9px 16px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tabs button.active { background: var(--panel2); color: var(--text); border-top: 2px solid var(--accent); }
+.controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+}
+.controls input, .controls select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.controls input { flex: 1 1 220px; }
+.count { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+th {
+  position: sticky;
+  top: 0;
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 11.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+th.sorted { color: var(--accent); }
+td.num, td:nth-child(5), td:nth-child(6), td:nth-child(7), td:nth-child(8) {
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+}
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--panel2); }
+td .name { font-weight: 600; }
+td .slug { color: var(--dim); font-family: var(--mono); font-size: 11.5px; }
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: #2a2110;
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  vertical-align: 1px;
+}
+.up { color: var(--accent); }
+.down { color: var(--red); }
+.empty { color: var(--muted); padding: 24px; text-align: center; }
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(520px, 94vw);
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--panel2);
+  border-left: 1px solid var(--line);
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.5);
+  padding: 20px 22px 40px;
+  z-index: 10;
+}
+.drawer h2 { font-size: 16px; color: var(--text); text-transform: none; letter-spacing: 0; }
+.drawer .slugline { color: var(--dim); font-family: var(--mono); font-size: 12px; }
+.close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 14px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.kv { width: 100%; margin: 12px 0; }
+.kv td { border-bottom: 1px dashed var(--line); padding: 6px 4px; }
+.kv td:first-child { color: var(--muted); width: 46%; }
+.kv td:last-child { font-family: var(--mono); text-align: right; }
+.kv tr.total td { border-bottom: none; border-top: 2px solid var(--line); font-weight: 700; }
+.kv tr.total td:last-child { color: var(--accent); font-size: 15px; }
+.steps { list-style: none; margin: 10px 0; padding: 0; counter-reset: step; }
+.steps li { counter-increment: step; position: relative; padding: 8px 8px 8px 34px; border: 1px solid var(--line); border-radius: 5px; margin-bottom: 7px; background: var(--panel); font-size: 13px; }
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 9px;
+  top: 8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--panel2);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: center;
+  line-height: 17px;
+}
+.check { font-family: var(--mono); font-size: 12px; color: var(--accent); margin-top: 4px; }
+.check.bad { color: var(--red); }
+.reason { color: var(--muted); font-size: 13px; }
+footer { margin-top: 22px; color: var(--dim); font-size: 12.5px; max-width: 900px; }
+@media (max-width: 760px) {
+  body { padding: 12px 10px 30px; }
+  th:nth-child(4), td:nth-child(4), th:nth-child(7), td:nth-child(7) { display: none; }
+}

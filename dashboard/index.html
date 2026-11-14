@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Launch Radar — pre-token protocols, ranked by implied value</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>TOKEN LAUNCH RADAR</h1>
+    <p class="sub">Protocols that record no token, ranked by what a launch would be worth — priced off the snapshot's own live tokens. Snapshot: DefiLlama protocols, as of <span id="asof"></span>.</p>
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<section class="method" id="method">
+  <h2>How the value is priced <span class="tag" id="modelver"></span></h2>
+  <p class="formula">implied = TVL &times; blended &times; growth &times; maturity &times; chain</p>
+  <p><b>blended</b> is the geometric mean of two multiples fitted from the snapshot's own live tokens:
+  the <b>category multiple</b> (median mcap/TVL of the live tokens in the category, shrunk toward the
+  global median with k = 5, clamped to the live p10–p90 band) and the <b>size-curve multiple</b>
+  (a log-log mcap-on-TVL regression). The size curve is weak — its R&sup2; is shown below — so it is
+  one blended signal, never the value on its own. <b>growth</b> is 1 + clamped 7-day TVL change &times; 0.5.
+  <b>maturity</b> rewards protocols that ran longer with no token. <b>chain</b> is a small multi-chain
+  durability signal (1.00–1.20). No protocol name is ever special-cased.</p>
+  <div class="fit" id="fit"></div>
+  <p class="note"><b>Backtest (in-sample):</b> the same model run over the live tokens that calibrate it —
+  <span id="backtest"></span>. In-sample by construction: a sanity check on the fit, not a claim the model
+  predicts launches. <b>Set aside:</b> <span id="setaside-note"></span>. A protocol is said to
+  <i>record no token</i>, never to have none: its DefiLlama record may simply not carry one.</p>
+</section>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="board" class="active">Pre-token board</button>
+  <button data-tab="live">Live tokens</button>
+  <button data-tab="aside">Set aside</button>
+</nav>
+
+<div class="controls">
+  <input id="q" type="search" placeholder="Search name or slug…" autocomplete="off">
+  <select id="cat" aria-label="Category filter"></select>
+  <select id="chain" aria-label="Chain filter"></select>
+  <span class="count" id="count"></span>
+</div>
+
+<main>
+  <table id="board">
+    <thead><tr>
+      <th data-sort="rank">Rank</th>
+      <th data-sort="name">Protocol</th>
+      <th data-sort="category">Category</th>
+      <th data-sort="chains">Chains</th>
+      <th data-sort="tvl_usd">TVL</th>
+      <th data-sort="change_7d">7d</th>
+      <th data-sort="age_days">Age</th>
+      <th data-sort="implied_value_usd">Implied value</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="empty" id="empty" hidden>No protocol matches the filter.</p>
+</main>
+
+<aside class="drawer" id="detail" hidden>
+  <button class="close" id="close-detail" aria-label="Close detail">✕</button>
+  <div id="detail-body"></div>
+</aside>
+
+<footer>
+  <p>Board rows: every watchlist protocol plus every other native pre-token protocol in the snapshot.
+  Live-token protocols are shown apart at their market's own values, never mixed into the ranking.
+  Farm plans are derived from each protocol's own category, chains, TVL and age.</p>
+</footer>
+
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
