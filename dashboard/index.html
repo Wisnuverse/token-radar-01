@@ -12,26 +12,28 @@
     <h1>TOKEN LAUNCH RADAR</h1>
     <p class="sub">Protocols that record no token, ranked by what a launch would be worth — priced off the snapshot's own live tokens. Snapshot: DefiLlama protocols, as of <span id="asof"></span>.</p>
   </div>
-  <div class="stats" id="stats"></div>
+  <div class="badges" id="badges"></div>
 </header>
 
-<section class="method" id="method">
-  <h2>How the value is priced <span class="tag" id="modelver"></span></h2>
-  <p class="formula">implied = TVL &times; blended &times; growth &times; maturity &times; chain</p>
-  <p><b>blended</b> is the geometric mean of two multiples fitted from the snapshot's own live tokens:
-  the <b>category multiple</b> (median mcap/TVL of the live tokens in the category, shrunk toward the
-  global median with k = 5, clamped to the live p10–p90 band) and the <b>size-curve multiple</b>
-  (a log-log mcap-on-TVL regression). A category with fewer than 3 traded peers does not price
-  itself: it falls back to the snapshot-wide median, and the detail view says so. Each row also
-  carries a <b>value band</b> — the point estimate &divide; and &times; one median leave-one-out
-  error — because a point without its uncertainty is a claim the model cannot support. Every farm
-  plan is <b>netted at the band's low end</b> — the farmer's expected gross (10% of launch value,
-  pro-rata by capital) minus the plan's own gas — with the break-even capital beside it. The
-  set-aside rows carry <b>demoted values</b> priced off their size neighbours, never ranked.</p>
-  <div class="fit" id="fit"></div>
-  <p class="note"><b>Validation (leave-one-out):</b> <span id="backtest"></span>
-  <b>Audit:</b> <span id="audit-note"></span> A protocol is said to <i>record no token</i>, never to
-  have none: its DefiLlama record may simply not carry one.</p>
+<section class="hero">
+  <div class="hero-left">
+    <h2><span id="boardcount"></span> protocols record no token. Here is what each launch would be worth — and what farming it costs.</h2>
+    <p class="total">Their launches imply <b id="totalimplied"></b> in total, priced like the <span id="livecount"></span> tokens that already trade. No name is hand-picked: one fitted model prices the page and the board.</p>
+    <div class="verdicts" id="verdicts"></div>
+    <p class="best" id="besthour"></p>
+    <p class="funnel" id="funnel"></p>
+  </div>
+  <div class="hero-mid">
+    <h2>How a launch is priced <span class="tag" id="modelver"></span></h2>
+    <p class="formula" id="formula"></p>
+    <table class="ladder" id="ladder"></table>
+    <p class="tsplit" id="tsplit"></p>
+  </div>
+  <div class="hero-right">
+    <h2>Traded tokens and the curve</h2>
+    <div class="chart" id="chart"></div>
+    <p class="chartnote" id="chartnote"></p>
+  </div>
 </section>
 
 <nav class="tabs" id="tabs">
@@ -44,6 +46,14 @@
   <input id="q" type="search" placeholder="Search name or slug…" autocomplete="off">
   <select id="cat" aria-label="Category filter"></select>
   <select id="chain" aria-label="Chain filter"></select>
+  <select id="verdict" aria-label="Verdict filter">
+    <option value="">All verdicts</option>
+    <option value="ROBUST">ROBUST</option>
+    <option value="FARM">FARM</option>
+    <option value="THIN">THIN</option>
+    <option value="SKIP">SKIP</option>
+  </select>
+  <label class="checkline"><input id="hidelinked" type="checkbox"> Hide parent-linked</label>
   <span class="count" id="count"></span>
 </div>
 
@@ -51,16 +61,7 @@
 
 <main>
   <table id="board">
-    <thead><tr>
-      <th data-sort="rank">Rank</th>
-      <th data-sort="name">Protocol</th>
-      <th data-sort="category">Category</th>
-      <th data-sort="chains">Chains</th>
-      <th data-sort="tvl_usd">TVL</th>
-      <th data-sort="change_7d">7d</th>
-      <th data-sort="age_days">Age</th>
-      <th data-sort="implied_value_usd">Implied value</th>
-    </tr></thead>
+    <thead><tr id="headrow"></tr></thead>
     <tbody id="rows"></tbody>
   </table>
   <p class="empty" id="empty" hidden>No protocol matches the filter.</p>
@@ -69,7 +70,6 @@
 <section class="research" id="research">
   <h2>Research note — what the snapshot says</h2>
   <div id="research-body"></div>
-  <div class="chart" id="chart"></div>
 </section>
 
 <aside class="drawer" id="detail" hidden>
@@ -81,7 +81,8 @@
   <p>Board rows: every watchlist protocol plus every other native pre-token protocol in the snapshot.
   Live-token protocols are shown apart at their market's own values, never mixed into the ranking.
   Set-aside rows are priced demoted off their size neighbours and never ranked. Farm plans are
-  derived from each protocol's own category, chains, TVL and age, and netted at the band's low end.</p>
+  derived from each protocol's own category, chains, TVL and age, and netted at a $1,000 ticket:
+  10% of launch value pro-rata by capital, minus gas and a 4% T-bill opportunity cost.</p>
 </footer>
 
 <script src="../data.js"></script>

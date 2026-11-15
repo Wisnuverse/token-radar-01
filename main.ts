@@ -1,14 +1,16 @@
-// Token launch radar, v3 (Node 22, standard library only, no network).
+// Token launch radar, v4 (Node 22, standard library only, no network).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores
-// every native pre-token protocol with the comps-calibrated model in lib/model.ts — v3 prices thin
-// categories off the snapshot-wide median, carries a value band per row, nets every farm plan at
-// the band's low end, prices the set-aside rows demoted off their size neighbours, and validates
-// itself three ways out of sample (leave-one-out, 5-fold cross-validation, and a blind time-split)
-// — writes the ranked board to /output/board.json and the dashboard's data to /output/data.js,
-// copies this repository's dashboard/ to /output, decodes its base64 screenshots/ into
-// /output/screenshots/ as JPEGs, and writes /output/dossier.json with the vendored make.fun
-// library (vendor/makefun-board.ts, the scorer's own file, byte for byte).
+// every native pre-token protocol with the joint model in lib/model.ts — v4 prices each protocol
+// off one fitted equation (a log-log size curve plus a shrunk category dummy), nets every farm
+// plan at a $1,000 ticket with a four-tier verdict, flags parent-linked protocols, prices the
+// set-aside rows demoted off their size neighbours, and validates itself on a ladder of
+// out-of-sample reads (flat multiple, size curve alone, joint model — leave-one-out, 5-fold
+// cross-validation, and a blind time-split, each against the flat baseline) — writes the ranked
+// board to /output/board.json and the dashboard's data to /output/data.js, copies this
+// repository's dashboard/ to /output, decodes its base64 screenshots/ into /output/screenshots/
+// as JPEGs, and writes /output/dossier.json with the vendored make.fun library
+// (vendor/makefun-board.ts, the scorer's own file, byte for byte).
 //
 // The run is fully deterministic: the model derives every number from the snapshot, every sort
 // breaks ties by slug, and no clock or random source is read. Two runs write identical bytes.
@@ -119,10 +121,12 @@ writeFileSync(
   buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: DASHBOARD_CAPS }),
 );
 
+const vc = radar.verdict_counts;
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live shown, ${radar.set_aside_size} set aside)\n` +
-    `token radar: leave-one-out backtest over ${radar.backtest_loo.n} live tokens: median error x${Math.exp(radar.backtest_loo.median_abs_log_error).toFixed(2)}, ${Math.round(radar.backtest_loo.within_2x_share * 100)}% within 2x\n` +
-    `token radar: 5-fold cross-validation over ${radar.backtest_cv.n} live tokens: median error x${Math.exp(radar.backtest_cv.median_abs_log_error).toFixed(2)}, ${Math.round(radar.backtest_cv.within_2x_share * 100)}% within 2x\n` +
-    `token radar: blind time-split (fit on the oldest ${radar.backtest_time_split.train_n}, test on the newest ${radar.backtest_time_split.n}): median error x${Math.exp(radar.backtest_time_split.median_abs_log_error).toFixed(2)}, ${Math.round(radar.backtest_time_split.within_2x_share * 100)}% within 2x\n` +
+    `token radar: validation ladder (leave-one-out, ${radar.backtest_loo.n} live tokens): flat x${Math.exp(radar.backtest_flat.median_abs_log_error).toFixed(2)} -> size curve x${Math.exp(radar.backtest_size.median_abs_log_error).toFixed(2)} -> joint x${Math.exp(radar.backtest_loo.median_abs_log_error).toFixed(2)} (${Math.round(radar.backtest_loo.within_2x_share * 100)}% within 2x)\n` +
+    `token radar: 5-fold cross-validation: median error x${Math.exp(radar.backtest_cv.median_abs_log_error).toFixed(2)}, ${Math.round(radar.backtest_cv.within_2x_share * 100)}% within 2x\n` +
+    `token radar: blind time-split (fit on the oldest ${radar.backtest_time_split.train_n}, test on the newest ${radar.backtest_time_split.n}): joint x${Math.exp(radar.backtest_time_split.median_abs_log_error).toFixed(2)} vs flat x${Math.exp(radar.backtest_time_split_flat.median_abs_log_error).toFixed(2)}\n` +
+    `token radar: farm verdicts at a $1,000 ticket: ROBUST ${vc.ROBUST} · FARM ${vc.FARM} · THIN ${vc.THIN} · SKIP ${vc.SKIP}; best net per hour ${radar.best_per_hour.name} $${radar.best_per_hour.net_per_hour_usd}/h\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dashFiles.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );
