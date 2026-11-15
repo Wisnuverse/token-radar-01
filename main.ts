@@ -1,10 +1,11 @@
-// Token launch radar (Node 22, standard library only, no network).
+// Token launch radar, v2 (Node 22, standard library only, no network).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores
-// every native pre-token protocol with the comps-calibrated model in lib/model.ts, writes the
-// ranked board to /output/board.json and the dashboard's data to /output/data.js, copies this
-// repository's dashboard/ to /output, decodes its base64 screenshots/ into /output/screenshots/
-// as JPEGs, and writes /output/dossier.json with the
+// every native pre-token protocol with the comps-calibrated model in lib/model.ts — v2 prices thin
+// categories off the snapshot-wide median, carries a value band per row, and validates itself with
+// a leave-one-out backtest — writes the ranked board to /output/board.json and the dashboard's
+// data to /output/data.js, copies this repository's dashboard/ to /output, decodes its base64
+// screenshots/ into /output/screenshots/ as JPEGs, and writes /output/dossier.json with the
 // vendored make.fun library (vendor/makefun-board.ts, the scorer's own file, byte for byte).
 //
 // The run is fully deterministic: the model derives every number from the snapshot, every sort
@@ -118,5 +119,6 @@ writeFileSync(
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live shown, ${radar.set_aside_size} set aside)\n` +
+    `token radar: leave-one-out backtest over ${radar.backtest_loo.n} live tokens: median error x${Math.exp(radar.backtest_loo.median_abs_log_error).toFixed(2)}, ${Math.round(radar.backtest_loo.within_2x_share * 100)}% within 2x\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dashFiles.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

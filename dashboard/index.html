@@ -21,15 +21,14 @@
   <p><b>blended</b> is the geometric mean of two multiples fitted from the snapshot's own live tokens:
   the <b>category multiple</b> (median mcap/TVL of the live tokens in the category, shrunk toward the
   global median with k = 5, clamped to the live p10–p90 band) and the <b>size-curve multiple</b>
-  (a log-log mcap-on-TVL regression). The size curve is weak — its R&sup2; is shown below — so it is
-  one blended signal, never the value on its own. <b>growth</b> is 1 + clamped 7-day TVL change &times; 0.5.
-  <b>maturity</b> rewards protocols that ran longer with no token. <b>chain</b> is a small multi-chain
-  durability signal (1.00–1.20). No protocol name is ever special-cased.</p>
+  (a log-log mcap-on-TVL regression). A category with fewer than 3 traded peers does not price
+  itself: it falls back to the snapshot-wide median, and the detail view says so. Each row also
+  carries a <b>value band</b> — the point estimate &divide; and &times; one median leave-one-out
+  error — because a point without its uncertainty is a claim the model cannot support.</p>
   <div class="fit" id="fit"></div>
-  <p class="note"><b>Backtest (in-sample):</b> the same model run over the live tokens that calibrate it —
-  <span id="backtest"></span>. In-sample by construction: a sanity check on the fit, not a claim the model
-  predicts launches. <b>Set aside:</b> <span id="setaside-note"></span>. A protocol is said to
-  <i>record no token</i>, never to have none: its DefiLlama record may simply not carry one.</p>
+  <p class="note"><b>Validation (leave-one-out):</b> <span id="backtest"></span>
+  <b>Audit:</b> <span id="audit-note"></span> A protocol is said to <i>record no token</i>, never to
+  have none: its DefiLlama record may simply not carry one.</p>
 </section>
 
 <nav class="tabs" id="tabs">
@@ -44,6 +43,8 @@
   <select id="chain" aria-label="Chain filter"></select>
   <span class="count" id="count"></span>
 </div>
+
+<div class="catsum" id="catsum" hidden></div>
 
 <main>
   <table id="board">
@@ -61,6 +62,12 @@
   </table>
   <p class="empty" id="empty" hidden>No protocol matches the filter.</p>
 </main>
+
+<section class="research" id="research">
+  <h2>Research note — what the snapshot says</h2>
+  <div id="research-body"></div>
+  <div class="chart" id="chart"></div>
+</section>
 
 <aside class="drawer" id="detail" hidden>
   <button class="close" id="close-detail" aria-label="Close detail">✕</button>

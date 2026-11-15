@@ -1,4 +1,4 @@
-// The token radar's model: one sealed snapshot in, one ranked board out.
+// The token radar's model, v2: one sealed snapshot in, one ranked board out.
 //
 // Board: every protocol the snapshot's watchlist names (the floor, never the ceiling) plus every
 // other native pre-token protocol the snapshot carries. A protocol is pre-token when its record
@@ -13,7 +13,9 @@
 //
 //   categoryMultiple  median mcap/TVL of the live tokens in the protocol's category, shrunk
 //                     toward the global median (k = 5), clamped to the live [p10, p90] band.
-//                     Small categories cannot drag the board: Risk Curators has n = 1.
+//                     A category with fewer than 3 traded peers does not get its own median at
+//                     all: it falls back to the snapshot-wide median, and the detail view says
+//                     so. (v1 let one token — Api3, n = 1 — price the whole top of the board.)
 //   sizeCurveMultiple a log-log regression of mcap on TVL, fitted at runtime from the live
 //                     tokens. Its R-squared is weak (about 0.19): it is one blended signal,
 //                     never the value on its own.
@@ -23,10 +25,16 @@
 //   chainMultiplier   1 + 0.05 x min(max(chains - 1, 0), 4): a small durability signal, 1.00-1.20.
 //   implied = max(1, round(tvl_usd x blended x growth x maturity x chain))
 //
-// backtestModel runs the same model over the live tokens and reports the median absolute log-error
-// and the share of predictions within 2x of the real market cap. It is in-sample (the same tokens
-// calibrate the model), and the dashboard says so: it is a sanity check on the fit, not a claim
-// the model predicts launches.
+// Every row also carries a value band: the point estimate divided and multiplied by one median
+// leave-one-out error, so the board states its own uncertainty instead of hiding it. And every
+// row names its three nearest live comparables (same category first, by TVL proximity), so the
+// evidence behind a number is checkable in one glance.
+//
+// backtestLOO runs the same model over the live tokens with each token held out in turn (the fit
+// is rebuilt without it), and reports the median absolute log-error and the share of predictions
+// within 2x of the real market cap. It is the validation number the dashboard leads with: an
+// in-sample backtest is kept beside it, labelled as such, because a model that grades its own
+// homework is not evidence.
 //
 // Everything is deterministic: no Date.now, no randomness, every sort breaks ties by slug.
 
@@ -59,11 +67,13 @@ export interface ModelFit {
   live_n: number;
   /** Median mcap/TVL across the live tokens. */
   global_median: number;
-  /** 10th and 90th percentile of the live mcap/TVL multiples: the clamp band. */
+  /** 10th and 90th percentile of the live mcap/TVL multiples: the clamp band — and the spread the hero context quotes (min/max are single outliers, not the spread). */
   p10: number;
   p90: number;
   /** Shrinkage strength toward the global median. */
   shrink_k: number;
+  /** Minimum traded peers for a category to price itself; fewer fall back to the global median. */
+  min_peers: number;
   /** Log-log size curve: log(mcap) = intercept + slope x log(tvl). */
   size_intercept: number;
   size_slope: number;
@@ -73,7 +83,7 @@ export interface ModelFit {
   categories: Record<string, { median: number; n: number }>;
 }
 
-/** The backtest of the model against the live tokens (in-sample, labelled as such). */
+/** A backtest of the model against the live tokens: median error and share within 2x. */
 export interface Backtest {
   n: number;
   /** Median |ln(predicted / actual)| across the live tokens. */
@@ -82,10 +92,24 @@ export interface Backtest {
   within_2x_share: number;
 }
 
+/** One live token named as evidence for a row's value. */
+export interface Comparable {
+  slug: string;
+  name: string;
+  /** Its own mcap/TVL multiple. */
+  multiple: number;
+  /** Whether it shares the row's category (false: the nearest live token overall). */
+  same_category: boolean;
+}
+
 /** One protocol's full model breakdown, as the detail view shows it. */
 export interface ModelBreakdown {
   category_multiple: number;
   category_n: number;
+  /** True when the category had fewer than MIN_CATEGORY_PEERS live tokens and the global median priced it. */
+  category_fallback: boolean;
+  /** The category's raw live median before any fallback or shrinkage (the global median when n = 0). */
+  category_raw_median: number;
   size_multiple: number;
   blended_multiple: number;
   growth_pct: number;
@@ -93,6 +117,23 @@ export interface ModelBreakdown {
   maturity_multiplier: number;
   chain_multiplier: number;
   age_days: number | null;
+  /** The value band: the point estimate / and x one median leave-one-out error. */
+  value_low_usd: number;
+  value_high_usd: number;
+  /** The three nearest live comparables, same category first. */
+  comparables: Comparable[];
+}
+
+/** A farm plan's economics, summed from its own steps. */
+export interface FarmSummary {
+  /** Capital across the main position and the second-market position, in whole dollars. */
+  capital_usd: number;
+  /** Estimated gas across setup, weekly actions, exit and claim, in whole dollars. */
+  gas_usd: number;
+  /** The hold window in days. */
+  hold_days: number;
+  /** One-off setup time in minutes. */
+  setup_minutes: number;
 }
 
 /** One row of board.json: the ranked board's row. */
@@ -113,6 +154,7 @@ export interface BoardRow {
   age_days: number | null;
   implied_value_usd: number;
   model: ModelBreakdown;
+  farm_summary: FarmSummary;
   farm_steps: string[];
 }
 
@@ -130,6 +172,7 @@ export interface RadarRow {
   age_days: number | null;
   implied_value_usd: number;
   model: ModelBreakdown;
+  farm_summary: FarmSummary;
   farm_steps: string[];
 }
 
@@ -154,6 +197,43 @@ export interface SetAsideRow {
   reason: string;
 }
 
+/** The audit funnel: every pre-token record accounted for, from the snapshot's own counts. */
+export interface AuditFunnel {
+  /** Records with no token at all. */
+  pre_token: number;
+  /** Pre-token records the board may rank (not an exchange, not a versioned pool). */
+  rankable: number;
+  /** Rankable records on the board. */
+  board: number;
+  /** Rankable records set aside as wrapped / staked / bridged products. */
+  set_aside: number;
+  /** Pre-token records excluded from ranking (an exchange category or a versioned name). */
+  excluded: number;
+}
+
+/** One of the research note's top picks, with its reason derived from its own figures. */
+export interface TopPick {
+  slug: string;
+  name: string;
+  rank: number;
+  implied_value_usd: number;
+  reason: string;
+}
+
+/** The research note's numbers: strongest and weakest categories, and the top picks. */
+export interface ResearchNote {
+  /** The three categories with the highest live median multiple (n >= 3). */
+  strongest: { category: string; median: number; n: number }[];
+  /** The three categories with the lowest live median multiple (n >= 3). */
+  weakest: { category: string; median: number; n: number }[];
+  /** The board's top five rows, each with a one-line reason from its own figures. */
+  top_picks: TopPick[];
+  /** Total TVL of the board's rows, in whole dollars. */
+  board_tvl_usd: number;
+  /** Total TVL of the watchlist rows, in whole dollars. */
+  watchlist_tvl_usd: number;
+}
+
 /** Everything the dashboard renders. */
 export interface RadarData {
   as_of: string;
@@ -161,7 +241,12 @@ export interface RadarData {
   floor_usd: number;
   model_version: string;
   fit: ModelFit;
+  /** The in-sample backtest (kept, labelled as such). */
   backtest: Backtest;
+  /** The leave-one-out backtest: the validation number the dashboard leads with. */
+  backtest_loo: Backtest;
+  audit: AuditFunnel;
+  research: ResearchNote;
   watchlist_size: number;
   board_size: number;
   early_size: number;
@@ -173,13 +258,15 @@ export interface RadarData {
 }
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-2-comps';
+export const MODEL_VERSION = 'radar-3-comps';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
 
 /** Shrinkage strength for category multiples. */
 export const SHRINK_K = 5;
+/** A category needs this many traded peers to price itself; fewer fall back to the global median. */
+export const MIN_CATEGORY_PEERS = 3;
 /** Growth clamp, in per cent, and its weight. */
 export const GROWTH_FLOOR = -60;
 export const GROWTH_CAP = 120;
@@ -192,6 +279,10 @@ export const UNKNOWN_AGE_DAYS = 365;
 /** Chain multiplier: 0.05 per extra chain, capped at 4 extra chains. */
 export const CHAIN_STEP = 0.05;
 export const CHAIN_MAX_EXTRA = 4;
+/** How many comparables a row names. */
+export const COMPARABLES = 3;
+/** How many top picks the research note names. */
+export const TOP_PICKS = 5;
 
 /** Why the snapshot is not one this model can score. */
 export class SnapshotError extends Error {
@@ -276,6 +367,8 @@ export function liveTokens(protocols: SnapshotProtocol[]): SnapshotProtocol[] {
   return protocols.filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0);
 }
 
+// ---------------------------------------------------------------- fit + scoring
+
 /**
  * Fit the model from the snapshot's own live tokens: the global and per-category mcap/TVL medians,
  * the [p10, p90] clamp band, and the log-log size curve (slope, intercept, R-squared).
@@ -329,6 +422,7 @@ export function fitModel(protocols: SnapshotProtocol[]): ModelFit {
     p10,
     p90,
     shrink_k: SHRINK_K,
+    min_peers: MIN_CATEGORY_PEERS,
     size_intercept: intercept,
     size_slope: slope,
     size_r2: r2,
@@ -337,15 +431,23 @@ export function fitModel(protocols: SnapshotProtocol[]): ModelFit {
 }
 
 /**
- * The category multiple: the category's live median, shrunk toward the global median with strength
- * k, then clamped to the live [p10, p90] band. A category with no live token scores the global median.
+ * The category multiple. A category with at least MIN_CATEGORY_PEERS live tokens gets its live
+ * median, shrunk toward the global median with strength k, then clamped to the live [p10, p90]
+ * band. A category with fewer peers — or none — falls back to the snapshot-wide median, and the
+ * caller is told: one token must never price a whole category.
  */
-export function categoryMultiple(category: string | null, fit: ModelFit): { multiple: number; n: number } {
+export function categoryMultiple(
+  category: string | null,
+  fit: ModelFit,
+): { multiple: number; n: number; fallback: boolean; raw_median: number } {
   const entry = category === null ? undefined : fit.categories[category];
   const n = entry === undefined ? 0 : entry.n;
   const raw = entry === undefined ? fit.global_median : entry.median;
+  if (n < fit.min_peers) {
+    return { multiple: fit.global_median, n, fallback: true, raw_median: raw };
+  }
   const shrunk = (n * raw + fit.shrink_k * fit.global_median) / (n + fit.shrink_k);
-  return { multiple: Math.min(fit.p90, Math.max(fit.p10, shrunk)), n };
+  return { multiple: Math.min(fit.p90, Math.max(fit.p10, shrunk)), n, fallback: false, raw_median: raw };
 }
 
 /** The size-curve multiple at a TVL: the fitted mcap over the TVL. */
@@ -371,25 +473,65 @@ export function chainMultiplier(chains: string[]): number {
   return 1 + CHAIN_STEP * Math.min(Math.max(chains.length - 1, 0), CHAIN_MAX_EXTRA);
 }
 
+/**
+ * The value band around a point estimate: one median leave-one-out error each way, in log space.
+ * `bandFactor` is exp(median |ln(predicted / actual)|) from the leave-one-out backtest; without
+ * it the band collapses to the point itself (the backtest path, where no band is shown).
+ */
+export function valueBand(implied: number, bandFactor?: number): { low: number; high: number } {
+  if (bandFactor === undefined || !(bandFactor > 1)) return { low: implied, high: implied };
+  return { low: Math.max(1, Math.round(implied / bandFactor)), high: Math.round(implied * bandFactor) };
+}
+
+/**
+ * The nearest live comparables for a protocol: same-category tokens first, ordered by TVL
+ * proximity in log space, then the nearest live tokens overall to fill the list. Ties break by
+ * slug, so the list is deterministic.
+ */
+export function comparablesFor(p: SnapshotProtocol, live: SnapshotProtocol[]): Comparable[] {
+  const logTvl = Math.log(Math.max(1, p.tvl_usd));
+  const byProximity = (a: SnapshotProtocol, b: SnapshotProtocol): number => {
+    const da = Math.abs(Math.log(Math.max(1, a.tvl_usd)) - logTvl);
+    const db = Math.abs(Math.log(Math.max(1, b.tvl_usd)) - logTvl);
+    return da - db || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0);
+  };
+  const same = live.filter((q) => q.category === p.category && q.slug !== p.slug).sort(byProximity);
+  const rest = live.filter((q) => q.category !== p.category && q.slug !== p.slug).sort(byProximity);
+  const picked: Comparable[] = [];
+  for (const q of same) {
+    if (picked.length >= COMPARABLES) break;
+    picked.push({ slug: q.slug, name: q.name, multiple: q.mcap_usd! / q.tvl_usd, same_category: true });
+  }
+  for (const q of rest) {
+    if (picked.length >= COMPARABLES) break;
+    picked.push({ slug: q.slug, name: q.name, multiple: q.mcap_usd! / q.tvl_usd, same_category: false });
+  }
+  return picked;
+}
+
 /** The full model breakdown and implied value for one protocol. */
 export function scoreProtocol(
   p: SnapshotProtocol,
   asOf: string,
   fit: ModelFit,
+  opts?: { bandFactor?: number; live?: SnapshotProtocol[] },
 ): { implied: number; breakdown: ModelBreakdown } {
   const age = ageDays(asOf, p.listed_at);
-  const { multiple: catMult, n: catN } = categoryMultiple(p.category, fit);
+  const { multiple: catMult, n: catN, fallback, raw_median: catRaw } = categoryMultiple(p.category, fit);
   const sizeMult = sizeCurveMultiple(p.tvl_usd, fit);
   const blended = Math.sqrt(catMult * sizeMult);
   const { pct, multiplier: growthMult } = growthMultiplier(p.change_7d);
   const maturityMult = maturityMultiplier(age);
   const chainMult = chainMultiplier(p.chains);
   const implied = Math.max(1, Math.round(p.tvl_usd * blended * growthMult * maturityMult * chainMult));
+  const band = valueBand(implied, opts?.bandFactor);
   return {
     implied,
     breakdown: {
       category_multiple: catMult,
       category_n: catN,
+      category_fallback: fallback,
+      category_raw_median: catRaw,
       size_multiple: sizeMult,
       blended_multiple: blended,
       growth_pct: pct,
@@ -397,6 +539,9 @@ export function scoreProtocol(
       maturity_multiplier: maturityMult,
       chain_multiplier: chainMult,
       age_days: age,
+      value_low_usd: band.low,
+      value_high_usd: band.high,
+      comparables: opts?.live === undefined ? [] : comparablesFor(p, opts.live),
     },
   };
 }
@@ -412,6 +557,33 @@ export function backtestModel(protocols: SnapshotProtocol[], asOf: string, fit: 
   let within = 0;
   for (const p of live) {
     const { implied } = scoreProtocol(p, asOf, fit);
+    const actual = p.mcap_usd!;
+    const ratio = implied / actual;
+    errors.push(Math.abs(Math.log(ratio)));
+    if (ratio >= 0.5 && ratio <= 2) within++;
+  }
+  errors.sort((a, b) => a - b);
+  return {
+    n: live.length,
+    median_abs_log_error: medianOf(errors, 0),
+    within_2x_share: live.length === 0 ? 0 : within / live.length,
+  };
+}
+
+/**
+ * The leave-one-out backtest: each live token is scored by a model fitted without it — the
+ * medians, the clamp band and the size curve are all rebuilt with the token held out — so the
+ * error is an honest out-of-sample read, not the model grading its own homework. 128 refits of a
+ * cheap fit; still well inside the program's time budget.
+ */
+export function backtestLOO(protocols: SnapshotProtocol[], asOf: string): Backtest {
+  const live = liveTokens(protocols);
+  const errors: number[] = [];
+  let within = 0;
+  for (const p of live) {
+    const heldOut = protocols.filter((q) => q.slug !== p.slug);
+    const fitMinus = fitModel(heldOut);
+    const { implied } = scoreProtocol(p, asOf, fitMinus);
     const actual = p.mcap_usd!;
     const ratio = implied / actual;
     errors.push(Math.abs(Math.log(ratio)));
@@ -472,6 +644,15 @@ function gasFor(chain: string): string {
   return 'about $2 of gas';
 }
 
+/** The same gas figure as a whole-dollar number, for the farm economics summary. */
+function gasUsdFor(chain: string): number {
+  const c = chain.toLowerCase();
+  if (c === 'ethereum') return 8;
+  if (c === 'solana') return 1;
+  if (c === 'bitcoin') return 3;
+  return 2;
+}
+
 /**
  * The category's one action, in words a farmer can follow. Every branch is derived from the
  * protocol's own category and chains, never from a hand-written list of names.
@@ -508,6 +689,57 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   return `Deposit $${capital} of USDC into ${name} on ${chain} and keep the position open.`;
 }
 
+/**
+ * The weekly qualifying action, specific to the category — the same branches as the opening
+ * action, phrased as upkeep. A weekly step that just says "deposit, borrow, swap or vote" is a
+ * template, not a plan.
+ */
+function weeklyActionFor(p: SnapshotProtocol, chain: string): string {
+  const c = (p.category ?? '').toLowerCase();
+  const name = p.name;
+  if (c.includes('leveraged')) return `Add a small amount to the leveraged position on ${name} or rebalance it, and check the health factor.`;
+  if (c.includes('lending') || c.includes('uncollateralized')) return `Supply a small extra amount to ${name} or repay a little of any borrow, and check utilization.`;
+  if (c.includes('cdp')) return `Top up the ${name} vault's collateral a little and check the collateral ratio.`;
+  if (c.includes('collateral')) return `Add a small amount of collateral to ${name} and check the position's health.`;
+  if (c.includes('curator') || c.includes('allocator')) return `Deposit a small extra amount into the ${name} vault and check its reported yield.`;
+  if (c.includes('bridge')) return `Bridge a small amount again through ${name} and use the funds in the destination app.`;
+  if (c.includes('restak')) return `Check the restaked position's rewards on ${name} and add a small amount if the terms still suit you.`;
+  if (c.includes('staking')) return `Check the stake's rewards on ${name} and compound a small amount.`;
+  if (c.includes('basis')) return `Check ${name}'s strategy funding rate and add a small deposit while it stays positive.`;
+  if (c.includes('yield')) return `Deposit a small amount into the same ${name} vault and check its yield.`;
+  if (c.includes('dex')) return `Add a little liquidity to the same ${name} pool and check the fees earned.`;
+  if (c.includes('liquidity manager')) return `Check the ${name} pool's range and add a small deposit.`;
+  if (c.includes('derivative')) return `Check the position's margin and funding on ${name}, and adjust the hedge if needed.`;
+  if (c.includes('rwa')) return `Check the asset's backing report on ${name} and add a small amount if the yield holds.`;
+  if (c.includes('insurance')) return `Check the ${name} policy's coverage and renew or top up if it is close to expiring.`;
+  if (c.includes('stablecoin')) return `Hold the stable asset and check its peg and backing on ${name}.`;
+  if (c.includes('prediction')) return `Check ${name}'s open markets and place one small position on a market you follow.`;
+  if (c.includes('governance')) return `Vote in any open ${name} proposal and check when the next one opens.`;
+  if (c.includes('indexes') || c.includes('index')) return `Check the ${name} index's composition and add a small amount.`;
+  if (c.includes('payments')) return `Route one small payment through ${name} on ${chain}.`;
+  if (c.includes('card')) return `Use the ${name} card for one small purchase.`;
+  if (c.includes('otc')) return `Check ${name}'s desk quotes; no trade is needed every week.`;
+  if (c.includes('farm')) return `Harvest or compound a small amount from the ${name} farm.`;
+  if (c.includes('btc') || c.includes('bitcoin')) return `Check the BTC position's yield on ${name} and add a small amount.`;
+  if (c.includes('chain')) return `Make one transaction on the chain ${name} runs on and keep the balance.`;
+  if (c.includes('cedefi')) return `Check the ${name} position and add a small amount.`;
+  return `Make one small qualifying action in ${name}'s app — a deposit, a swap or a vote.`;
+}
+
+/**
+ * The second-market step: the same position on the protocol's second chain, or, for a
+ * single-chain protocol, a smaller position in its other pool, market or vault. Activity in two
+ * places reads as a user, not a single deposit.
+ */
+function secondMarketFor(p: SnapshotProtocol, capital: number, chain: string): string {
+  const name = p.name;
+  const half = Math.max(25, Math.floor(capital / 2));
+  if (p.chains.length > 1) {
+    return `Open the same position on ${p.chains[1]} with a smaller $${half} so the activity spans two chains.`;
+  }
+  return `Open a second, smaller $${half} position in ${name}'s other pool, market or vault on ${chain} so the activity is not a single deposit.`;
+}
+
 /** A risk line for the categories where the farm can lose money beyond the capital at stake. */
 function riskFor(p: SnapshotProtocol): string | null {
   const c = (p.category ?? '').toLowerCase();
@@ -516,12 +748,18 @@ function riskFor(p: SnapshotProtocol): string | null {
   if (c.includes('cdp')) return 'A collateral vault can be liquidated if the collateral falls: keep the ratio well above the minimum.';
   if (c.includes('restak')) return 'Restaking adds slashing risk on top of the base stake: read the slashing terms first.';
   if (c.includes('lending') || c.includes('uncollateralized')) return 'Lending carries borrower-default and bad-debt risk: spread the deposit and check utilization.';
+  if (c.includes('rwa')) return 'The yield-bearing asset depends on its issuer and custodian: check who holds the backing and what happens if the issuer fails.';
+  if (c.includes('prediction')) return 'Market outcomes are decided by the protocol\u2019s resolution rules: read how a market resolves before staking on one.';
+  if (c.includes('bridge')) return 'Bridged funds depend on the bridge\u2019s security: bridge only what you can afford to have delayed or stuck.';
+  if (c.includes('stablecoin')) return 'A stable asset can depeg: check the backing and the peg history before holding a large amount.';
   return null;
 }
 
 /**
- * A protocol's farm plan: six steps, each an action with a cost and a time, plus a risk step where
- * the category calls for one. Derived from the protocol's own record, never from a list of names.
+ * A protocol's farm plan: seven steps — wallet, the category's action, a category-specific
+ * weekly action, a second-market position, the hold, the exit, and the safe claim — plus a risk
+ * step where the category calls for one. Derived from the protocol's own record, never from a
+ * list of names.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
@@ -540,24 +778,29 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '15 minutes to set up',
     },
     {
-      text: 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.',
+      text: weeklyActionFor(p, chain),
       cost: `${gas} a week`,
       time: '10 minutes a week',
     },
     {
-      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
-      cost: `the $${capital} stays in the position`,
+      text: secondMarketFor(p, capital, chain),
+      cost: `$${Math.max(25, Math.floor(capital / 2))} of capital and ${gas}`,
+      time: '15 minutes to set up',
+    },
+    {
+      text: `Hold the positions for at least ${hold} days so the activity is counted in more than one snapshot.`,
+      cost: `the capital stays in the positions`,
       time: `${hold} days`,
     },
     {
-      text: "Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.",
-      cost: 'no fee to check, and never pay to claim',
-      time: '10 minutes',
+      text: `Unwind in stages once the positions have run ${hold} days: close any open position first, withdraw half, keep the rest until any rewards window closes, then withdraw the remainder.`,
+      cost: gas,
+      time: '15 minutes',
     },
     {
-      text: 'Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.',
-      cost: 'nothing but the log',
-      time: '5 minutes',
+      text: "Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes — and log the wallet, the dates and every transaction so the position can be repeated or audited.",
+      cost: 'no fee to check, and never pay to claim',
+      time: '10 minutes',
     },
   ];
   const risk = riskFor(p);
@@ -571,13 +814,39 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   return steps;
 }
 
+/**
+ * A farm plan's economics, summed from its own steps: the capital in both positions, the gas
+ * across setup (two positions), one weekly action per week of the hold, the exit and the claim,
+ * the hold window, and the one-off setup time.
+ */
+export function farmSummary(p: SnapshotProtocol, age: number | null): FarmSummary {
+  const capital = capitalFor(p);
+  const second = Math.max(25, Math.floor(capital / 2));
+  const hold = holdDaysFor(age);
+  const gas = gasUsdFor(chainOf(p));
+  const weeklyTx = Math.ceil(hold / 7);
+  return {
+    capital_usd: capital + second,
+    gas_usd: gas * (2 + weeklyTx + 1 + 1),
+    hold_days: hold,
+    setup_minutes: 5 + 15 + 15,
+  };
+}
+
 // ---------------------------------------------------------------- board
 
 /** The protocols the board ranks, strongest first, with ranks 1..n. */
-export function buildBoard(snapshot: Snapshot, fit: ModelFit): BoardRow[] {
+export function buildBoard(
+  snapshot: Snapshot,
+  fit: ModelFit,
+  opts: { bandFactor: number; live: SnapshotProtocol[] },
+): BoardRow[] {
   const chosen = snapshot.protocols.filter(isNative);
   const scored = chosen.map((p) => {
-    const { implied, breakdown } = scoreProtocol(p, snapshot.as_of, fit);
+    const { implied, breakdown } = scoreProtocol(p, snapshot.as_of, fit, {
+      bandFactor: opts.bandFactor,
+      live: opts.live,
+    });
     return { p, implied, breakdown };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
@@ -599,6 +868,7 @@ export function buildBoard(snapshot: Snapshot, fit: ModelFit): BoardRow[] {
     age_days: s.breakdown.age_days,
     implied_value_usd: s.implied,
     model: s.breakdown,
+    farm_summary: farmSummary(s.p, s.breakdown.age_days),
     farm_steps: farmSteps(s.p, s.breakdown.age_days).map(stepText),
   }));
 }
@@ -650,17 +920,82 @@ export function radarRow(row: BoardRow): RadarRow {
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
     model: row.model,
+    farm_summary: row.farm_summary,
     farm_steps: row.farm_steps,
+  };
+}
+
+/** A short dollar figure for the research note's reasons. */
+function shortUSD(n: number): string {
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
+  return `$${Math.round(n / 1e3)}K`;
+}
+
+/** One top pick's reason, built from its own figures — never a hand-written opinion. */
+function pickReason(row: BoardRow, fit: ModelFit): string {
+  const m = row.model;
+  const parts: string[] = [];
+  if (m.category_fallback) {
+    parts.push(
+      `only ${m.category_n} traded peer${m.category_n === 1 ? '' : 's'} in ${row.category ?? 'its category'}, so the global median (${fit.global_median.toFixed(3)}) prices it`,
+    );
+  } else {
+    const vs = m.category_multiple / fit.global_median;
+    parts.push(
+      `${row.category ?? 'Its category'} multiple ${m.category_multiple.toFixed(3)} is ${vs.toFixed(1)}x the global median (${fit.global_median.toFixed(3)}, n = ${m.category_n})`,
+    );
+  }
+  parts.push(`TVL ${shortUSD(row.tvl_usd)}`);
+  if (row.on_watchlist) parts.push('on the watchlist');
+  return `${parts.join('; ')}.`;
+}
+
+/** The research note's numbers, all derived from the fitted model and the ranked board. */
+export function researchNote(board: BoardRow[], fit: ModelFit): ResearchNote {
+  const withPeers = Object.entries(fit.categories)
+    .filter(([, v]) => v.n >= MIN_CATEGORY_PEERS)
+    .map(([category, v]) => ({ category, median: v.median, n: v.n }));
+  const strongest = [...withPeers].sort((a, b) => b.median - a.median || (a.category < b.category ? -1 : 1)).slice(0, 3);
+  const weakest = [...withPeers].sort((a, b) => a.median - b.median || (a.category < b.category ? -1 : 1)).slice(0, 3);
+  return {
+    strongest,
+    weakest,
+    top_picks: board.slice(0, TOP_PICKS).map((row) => ({
+      slug: row.slug,
+      name: row.name,
+      rank: row.rank,
+      implied_value_usd: row.implied_value_usd,
+      reason: pickReason(row, fit),
+    })),
+    board_tvl_usd: board.reduce((s, r) => s + r.tvl_usd, 0),
+    watchlist_tvl_usd: board.filter((r) => r.on_watchlist).reduce((s, r) => s + r.tvl_usd, 0),
+  };
+}
+
+/** The audit funnel: every pre-token record accounted for. */
+export function auditFunnel(snapshot: Snapshot, board: BoardRow[], setAside: SetAsideRow[]): AuditFunnel {
+  const preToken = snapshot.protocols.filter(isPreToken).length;
+  const rankable = snapshot.protocols.filter(isRankable).length;
+  return {
+    pre_token: preToken,
+    rankable,
+    board: board.length,
+    set_aside: setAside.length,
+    excluded: preToken - rankable,
   };
 }
 
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: RadarData } {
   const fit = fitModel(snapshot.protocols);
-  const board = buildBoard(snapshot, fit);
-  const live = liveRows(snapshot);
-  const setAside = setAsideRows(snapshot);
+  const live = liveTokens(snapshot.protocols);
   const backtest = backtestModel(snapshot.protocols, snapshot.as_of, fit);
+  const backtestLoo = backtestLOO(snapshot.protocols, snapshot.as_of);
+  const bandFactor = Math.exp(backtestLoo.median_abs_log_error);
+  const board = buildBoard(snapshot, fit, { bandFactor, live });
+  const liveShown = liveRows(snapshot);
+  const setAside = setAsideRows(snapshot);
   const early = board.filter((r) => r.tvl_usd < snapshot.floor_usd).length;
   const radar: RadarData = {
     as_of: snapshot.as_of,
@@ -669,13 +1004,16 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     model_version: MODEL_VERSION,
     fit,
     backtest,
+    backtest_loo: backtestLoo,
+    audit: auditFunnel(snapshot, board, setAside),
+    research: researchNote(board, fit),
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: early,
-    live_size: live.length,
+    live_size: liveShown.length,
     set_aside_size: setAside.length,
     rows: board.map(radarRow),
-    live,
+    live: liveShown,
     set_aside: setAside,
   };
   return { board, radar };
