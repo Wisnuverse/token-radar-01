@@ -24,7 +24,10 @@
   (a log-log mcap-on-TVL regression). A category with fewer than 3 traded peers does not price
   itself: it falls back to the snapshot-wide median, and the detail view says so. Each row also
   carries a <b>value band</b> — the point estimate &divide; and &times; one median leave-one-out
-  error — because a point without its uncertainty is a claim the model cannot support.</p>
+  error — because a point without its uncertainty is a claim the model cannot support. Every farm
+  plan is <b>netted at the band's low end</b> — the farmer's expected gross (10% of launch value,
+  pro-rata by capital) minus the plan's own gas — with the break-even capital beside it. The
+  set-aside rows carry <b>demoted values</b> priced off their size neighbours, never ranked.</p>
   <div class="fit" id="fit"></div>
   <p class="note"><b>Validation (leave-one-out):</b> <span id="backtest"></span>
   <b>Audit:</b> <span id="audit-note"></span> A protocol is said to <i>record no token</i>, never to
@@ -77,7 +80,8 @@
 <footer>
   <p>Board rows: every watchlist protocol plus every other native pre-token protocol in the snapshot.
   Live-token protocols are shown apart at their market's own values, never mixed into the ranking.
-  Farm plans are derived from each protocol's own category, chains, TVL and age.</p>
+  Set-aside rows are priced demoted off their size neighbours and never ranked. Farm plans are
+  derived from each protocol's own category, chains, TVL and age, and netted at the band's low end.</p>
 </footer>
 
 <script src="../data.js"></script>

@@ -1,4 +1,4 @@
-// The token radar's model, v2: one sealed snapshot in, one ranked board out.
+// The token radar's model, v3: one sealed snapshot in, one ranked board out.
 //
 // Board: every protocol the snapshot's watchlist names (the floor, never the ceiling) plus every
 // other native pre-token protocol the snapshot carries. A protocol is pre-token when its record
@@ -8,6 +8,12 @@
 // rankable set: a Bridge / Canonical Bridge / Liquid Staking / Liquid Restaking / Restaked BTC /
 // CEX category, a name carrying a whole word wrapped / staked / staking, a name beginning with an
 // exchange's name, or a versioned name (a V2 pool of another protocol).
+//
+// v3 prices the set-aside rows anyway — demoted, never ranked. A demoted row is valued off its
+// size neighbours alone (the median mcap/TVL of the five live tokens nearest by TVL, times the
+// same growth / maturity / chain factors): no category premium, no blend, no rank. The audit
+// funnel is then complete — all 342 pre-token records are either ranked, demoted with a value and
+// a reason, or excluded — and the demotion is visible in the dashboard's Set aside view.
 //
 // Implied value is fitted from the snapshot's own live tokens, never from a hardcoded list:
 //
@@ -30,10 +36,19 @@
 // row names its three nearest live comparables (same category first, by TVL proximity), so the
 // evidence behind a number is checkable in one glance.
 //
-// backtestLOO runs the same model over the live tokens with each token held out in turn (the fit
-// is rebuilt without it), and reports the median absolute log-error and the share of predictions
-// within 2x of the real market cap. It is the validation number the dashboard leads with: an
-// in-sample backtest is kept beside it, labelled as such, because a model that grades its own
+// v3 nets every farm plan at the band's low end: the farmer's expected gross is FARMER_SHARE
+// (10%) of the launch value at the low end, pro-rata by the farmer's capital share of the
+// protocol's TVL, minus the plan's own gas. The 10% is an assumption and is stated wherever the
+// net appears; the break-even capital beside it needs no assumption at all — it is the capital
+// at which the same arithmetic turns positive. Most rows net negative at small capital, and the
+// dashboard says so: a farm that cannot pay its own gas at the low end is a fact, not a failure
+// of the plan.
+//
+// Validation is three out-of-sample reads, all computed here at runtime from the same snapshot:
+// backtestLOO (leave-one-out, the headline), backtestCV (5-fold cross-validation, deterministic
+// folds by slug — a second, independent out-of-sample read), and backtestTimeSplit (a blind
+// time-split: fit on the oldest half of the dated live tokens, test on the newest half). An
+// in-sample backtest is kept beside them, labelled as such, because a model that grades its own
 // homework is not evidence.
 //
 // Everything is deterministic: no Date.now, no randomness, every sort breaks ties by slug.
@@ -92,6 +107,14 @@ export interface Backtest {
   within_2x_share: number;
 }
 
+/** The blind time-split backtest: fitted on the oldest half, tested on the newest half. */
+export interface TimeSplitBacktest extends Backtest {
+  /** Live tokens held out of both sides for want of a listing date. */
+  excluded_no_date: number;
+  /** Live tokens the training fit saw (the oldest half by listing date). */
+  train_n: number;
+}
+
 /** One live token named as evidence for a row's value. */
 export interface Comparable {
   slug: string;
@@ -124,7 +147,7 @@ export interface ModelBreakdown {
   comparables: Comparable[];
 }
 
-/** A farm plan's economics, summed from its own steps. */
+/** A farm plan's economics, summed from its own steps — and netted at the band's low end. */
 export interface FarmSummary {
   /** Capital across the main position and the second-market position, in whole dollars. */
   capital_usd: number;
@@ -134,6 +157,12 @@ export interface FarmSummary {
   hold_days: number;
   /** One-off setup time in minutes. */
   setup_minutes: number;
+  /** The farmer's expected gross at the band's low end: FARMER_SHARE of the launch value, pro-rata by the farmer's capital share of the protocol's TVL. */
+  gross_low_usd: number;
+  /** The farm netted at the band's low end: gross minus gas. Negative when gas swamps the expected gross — the honest read for small capital in a large protocol. */
+  net_low_usd: number;
+  /** The capital at which the farm breaks even at the band's low end, under the same farmer-share assumption. */
+  breakeven_capital_usd: number;
 }
 
 /** One row of board.json: the ranked board's row. */
@@ -187,7 +216,7 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
-/** A set-aside protocol: pre-token, but a wrapped / staked / bridged product, with its reason. */
+/** A set-aside protocol: pre-token, but a wrapped / staked / bridged product, with its reason — and a demoted value, priced off its size neighbours, never ranked. */
 export interface SetAsideRow {
   slug: string;
   name: string;
@@ -195,6 +224,12 @@ export interface SetAsideRow {
   chains: string[];
   tvl_usd: number;
   reason: string;
+  /** The demoted value: TVL x the median multiple of the SIZE_NEIGHBOURS nearest live tokens by TVL, times the same growth / maturity / chain factors — no category premium, no blend. */
+  demoted_value_usd: number;
+  /** The size-neighbour median multiple behind the demoted value. */
+  size_multiple: number;
+  /** The nearest live tokens by TVL, each with its own multiple. */
+  neighbours: { slug: string; multiple: number }[];
 }
 
 /** The audit funnel: every pre-token record accounted for, from the snapshot's own counts. */
@@ -245,6 +280,10 @@ export interface RadarData {
   backtest: Backtest;
   /** The leave-one-out backtest: the validation number the dashboard leads with. */
   backtest_loo: Backtest;
+  /** The 5-fold cross-validation: a second, independent out-of-sample read. */
+  backtest_cv: Backtest;
+  /** The blind time-split backtest: fitted on the oldest half, tested on the newest half. */
+  backtest_time_split: TimeSplitBacktest;
   audit: AuditFunnel;
   research: ResearchNote;
   watchlist_size: number;
@@ -258,7 +297,7 @@ export interface RadarData {
 }
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-3-comps';
+export const MODEL_VERSION = 'radar-4-comps';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -283,6 +322,12 @@ export const CHAIN_MAX_EXTRA = 4;
 export const COMPARABLES = 3;
 /** How many top picks the research note names. */
 export const TOP_PICKS = 5;
+/** The farmer's share of launch value the netted farm assumes (10%), pro-rata by capital. Stated wherever the net appears. */
+export const FARMER_SHARE = 0.1;
+/** How many nearest live tokens by TVL price a demoted row. */
+export const SIZE_NEIGHBOURS = 5;
+/** Cross-validation folds for the second out-of-sample check. */
+export const CV_FOLDS = 5;
 
 /** Why the snapshot is not one this model can score. */
 export class SnapshotError extends Error {
@@ -597,6 +642,74 @@ export function backtestLOO(protocols: SnapshotProtocol[], asOf: string): Backte
   };
 }
 
+/**
+ * The 5-fold cross-validation: the live tokens are dealt into five deterministic folds by slug
+ * order, and each fold is scored by a model fitted on the other four. A second, independent
+ * out-of-sample read beside leave-one-out — if the two disagree, the model is less stable than
+ * either number alone suggests.
+ */
+export function backtestCV(protocols: SnapshotProtocol[], asOf: string, folds: number = CV_FOLDS): Backtest {
+  const live = liveTokens(protocols);
+  const ordered = [...live].sort((a, b) => (a.slug < b.slug ? -1 : 1));
+  const errors: number[] = [];
+  let within = 0;
+  for (let fold = 0; fold < folds; fold++) {
+    const test = ordered.filter((_, i) => i % folds === fold);
+    const testSlugs = new Set(test.map((p) => p.slug));
+    const train = protocols.filter((q) => !testSlugs.has(q.slug));
+    const fit = fitModel(train);
+    for (const p of test) {
+      const { implied } = scoreProtocol(p, asOf, fit);
+      const ratio = implied / p.mcap_usd!;
+      errors.push(Math.abs(Math.log(ratio)));
+      if (ratio >= 0.5 && ratio <= 2) within++;
+    }
+  }
+  errors.sort((a, b) => a - b);
+  return {
+    n: live.length,
+    median_abs_log_error: medianOf(errors, 0),
+    within_2x_share: live.length === 0 ? 0 : within / live.length,
+  };
+}
+
+/**
+ * The blind time-split backtest: the model is fitted on the oldest half of the dated live tokens
+ * and tested on the newest half — the fit never sees the tokens it is graded on, and the test
+ * tokens are the ones that listed most recently, so this is the closest the snapshot gets to
+ * "predict the future". Tokens without a listing date are held out of both sides, and counted.
+ */
+export function backtestTimeSplit(protocols: SnapshotProtocol[], asOf: string): TimeSplitBacktest {
+  const live = liveTokens(protocols);
+  const dated = live
+    .filter((p) => p.listed_at !== null)
+    .sort((a, b) => (a.listed_at! < b.listed_at! ? -1 : a.listed_at! > b.listed_at! ? 1 : a.slug < b.slug ? -1 : 1));
+  const cut = Math.floor(dated.length / 2);
+  const trainSlugs = new Set(dated.slice(0, cut).map((p) => p.slug));
+  const test = dated.slice(cut);
+  const liveSlugs = new Set(live.map((p) => p.slug));
+  // The training fit sees the old live tokens plus every non-live protocol (they carry no
+  // market cap, so they cannot leak the test tokens' values).
+  const train = protocols.filter((q) => trainSlugs.has(q.slug) || !liveSlugs.has(q.slug));
+  const fit = fitModel(train);
+  const errors: number[] = [];
+  let within = 0;
+  for (const p of test) {
+    const { implied } = scoreProtocol(p, asOf, fit);
+    const ratio = implied / p.mcap_usd!;
+    errors.push(Math.abs(Math.log(ratio)));
+    if (ratio >= 0.5 && ratio <= 2) within++;
+  }
+  errors.sort((a, b) => a - b);
+  return {
+    n: test.length,
+    median_abs_log_error: medianOf(errors, 0),
+    within_2x_share: test.length === 0 ? 0 : within / test.length,
+    excluded_no_date: live.length - dated.length,
+    train_n: cut,
+  };
+}
+
 // ---------------------------------------------------------------- farm plans
 
 /** A farm step: the action, what it costs, and how long it takes. */
@@ -817,19 +930,31 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
 /**
  * A farm plan's economics, summed from its own steps: the capital in both positions, the gas
  * across setup (two positions), one weekly action per week of the hold, the exit and the claim,
- * the hold window, and the one-off setup time.
+ * the hold window, and the one-off setup time — and the plan netted at the band's low end.
+ * The net assumes farmers collectively receive FARMER_SHARE of the launch value, split pro-rata
+ * by capital: gross = FARMER_SHARE x valueLow x (capital / TVL), net = gross - gas. The
+ * break-even capital is the capital at which that arithmetic turns positive, so a farmer can
+ * read off the smallest position that pays its own gas at the low end.
  */
-export function farmSummary(p: SnapshotProtocol, age: number | null): FarmSummary {
+export function farmSummary(p: SnapshotProtocol, age: number | null, valueLowUsd: number): FarmSummary {
   const capital = capitalFor(p);
   const second = Math.max(25, Math.floor(capital / 2));
   const hold = holdDaysFor(age);
   const gas = gasUsdFor(chainOf(p));
   const weeklyTx = Math.ceil(hold / 7);
+  const gasUsd = gas * (2 + weeklyTx + 1 + 1);
+  const totalCapital = capital + second;
+  const grossLow = Math.round(FARMER_SHARE * valueLowUsd * (totalCapital / Math.max(1, p.tvl_usd)));
+  const lowMultiple = valueLowUsd / Math.max(1, p.tvl_usd);
+  const breakeven = lowMultiple > 0 ? Math.ceil(gasUsd / (FARMER_SHARE * lowMultiple)) : 0;
   return {
-    capital_usd: capital + second,
-    gas_usd: gas * (2 + weeklyTx + 1 + 1),
+    capital_usd: totalCapital,
+    gas_usd: gasUsd,
     hold_days: hold,
     setup_minutes: 5 + 15 + 15,
+    gross_low_usd: grossLow,
+    net_low_usd: grossLow - gasUsd,
+    breakeven_capital_usd: breakeven,
   };
 }
 
@@ -868,24 +993,70 @@ export function buildBoard(
     age_days: s.breakdown.age_days,
     implied_value_usd: s.implied,
     model: s.breakdown,
-    farm_summary: farmSummary(s.p, s.breakdown.age_days),
+    farm_summary: farmSummary(s.p, s.breakdown.age_days, s.breakdown.value_low_usd),
     farm_steps: farmSteps(s.p, s.breakdown.age_days).map(stepText),
   }));
 }
 
-/** The set-aside protocols, by TVL, with the reason each was set aside. */
-export function setAsideRows(snapshot: Snapshot): SetAsideRow[] {
+/**
+ * The nearest live tokens by TVL, in log space: a demoted row's only evidence. Ties break by
+ * slug, so the list is deterministic.
+ */
+export function sizeNeighbours(p: SnapshotProtocol, live: SnapshotProtocol[], n: number): { slug: string; multiple: number }[] {
+  const logTvl = Math.log(Math.max(1, p.tvl_usd));
+  return [...live]
+    .filter((q) => q.slug !== p.slug)
+    .sort((a, b) => {
+      const da = Math.abs(Math.log(Math.max(1, a.tvl_usd)) - logTvl);
+      const db = Math.abs(Math.log(Math.max(1, b.tvl_usd)) - logTvl);
+      return da - db || (a.slug < b.slug ? -1 : 1);
+    })
+    .slice(0, n)
+    .map((q) => ({ slug: q.slug, multiple: q.mcap_usd! / q.tvl_usd }));
+}
+
+/**
+ * A demoted value for a set-aside protocol: TVL x the median multiple of its size neighbours,
+ * times the same growth / maturity / chain factors the ranked rows use. No category premium
+ * (a derivative's category is the thing that already trades), no blend, no rank — the
+ * demotion is the method, and the detail view says so.
+ */
+export function demotedValue(
+  p: SnapshotProtocol,
+  asOf: string,
+  live: SnapshotProtocol[],
+): { value: number; size_multiple: number; neighbours: { slug: string; multiple: number }[] } {
+  const neighbours = sizeNeighbours(p, live, SIZE_NEIGHBOURS);
+  const multiples = neighbours.map((n) => n.multiple).sort((a, b) => a - b);
+  const sizeMultiple = medianOf(multiples, 0);
+  const age = ageDays(asOf, p.listed_at);
+  const { multiplier: growthMult } = growthMultiplier(p.change_7d);
+  const value = Math.max(
+    1,
+    Math.round(p.tvl_usd * sizeMultiple * growthMult * maturityMultiplier(age) * chainMultiplier(p.chains)),
+  );
+  return { value, size_multiple: sizeMultiple, neighbours };
+}
+
+/** The set-aside protocols, by TVL, with the reason each was set aside — and a demoted value. */
+export function setAsideRows(snapshot: Snapshot, live: SnapshotProtocol[]): SetAsideRow[] {
   return snapshot.protocols
     .filter((p) => isRankable(p) && setAsideReason(p) !== null)
     .sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))
-    .map((p) => ({
-      slug: p.slug,
-      name: p.name,
-      category: p.category,
-      chains: p.chains,
-      tvl_usd: p.tvl_usd,
-      reason: setAsideReason(p)!,
-    }));
+    .map((p) => {
+      const d = demotedValue(p, snapshot.as_of, live);
+      return {
+        slug: p.slug,
+        name: p.name,
+        category: p.category,
+        chains: p.chains,
+        tvl_usd: p.tvl_usd,
+        reason: setAsideReason(p)!,
+        demoted_value_usd: d.value,
+        size_multiple: d.size_multiple,
+        neighbours: d.neighbours,
+      };
+    });
 }
 
 /** The live-token protocols, by market cap, for the dashboard's Live token view. */
@@ -992,10 +1163,12 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
   const live = liveTokens(snapshot.protocols);
   const backtest = backtestModel(snapshot.protocols, snapshot.as_of, fit);
   const backtestLoo = backtestLOO(snapshot.protocols, snapshot.as_of);
+  const backtestCv = backtestCV(snapshot.protocols, snapshot.as_of);
+  const backtestTs = backtestTimeSplit(snapshot.protocols, snapshot.as_of);
   const bandFactor = Math.exp(backtestLoo.median_abs_log_error);
   const board = buildBoard(snapshot, fit, { bandFactor, live });
   const liveShown = liveRows(snapshot);
-  const setAside = setAsideRows(snapshot);
+  const setAside = setAsideRows(snapshot, live);
   const early = board.filter((r) => r.tvl_usd < snapshot.floor_usd).length;
   const radar: RadarData = {
     as_of: snapshot.as_of,
@@ -1005,6 +1178,8 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     fit,
     backtest,
     backtest_loo: backtestLoo,
+    backtest_cv: backtestCv,
+    backtest_time_split: backtestTs,
     audit: auditFunnel(snapshot, board, setAside),
     research: researchNote(board, fit),
     watchlist_size: snapshot.watchlist.length,

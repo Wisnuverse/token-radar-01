@@ -1,4 +1,4 @@
-// Token Launch Radar — the page, v2. Renders window.RADAR (written by main.ts from the same board
+// Token Launch Radar — the page, v3. Renders window.RADAR (written by main.ts from the same board
 // the gate reads), so the screenshots and the code agree by construction: one dataset, two views.
 //
 // impliedOf(row) recomputes a row's implied value in the page from the snapshot's own figures and
@@ -35,6 +35,13 @@
     return d + 'd';
   };
   var fmtMult = function (n) { return n == null ? '—' : n.toFixed(3); };
+  /** A signed whole-dollar figure: +$12, −$18, $0. */
+  var fmtSigned = function (n) {
+    if (n == null || !isFinite(n)) return '—';
+    return (n > 0 ? '+$' : n < 0 ? '−$' : '$') + fmtInt(Math.abs(n));
+  };
+  /** A gross under a dollar reads as <$1, not $0 — the arithmetic is not zero, it is small. */
+  var fmtGross = function (n) { return n < 1 ? '&lt;$1' : '$' + fmtInt(n); };
 
   /** A row's implied value, recomputed in the page from its own figures and multipliers. */
   function impliedOf(row) {
@@ -47,7 +54,11 @@
   $('modelver').textContent = R.model_version;
   var bt = R.backtest;
   var loo = R.backtest_loo;
+  var cv = R.backtest_cv;
+  var ts = R.backtest_time_split;
   var looErr = Math.exp(loo.median_abs_log_error);
+  var cvErr = Math.exp(cv.median_abs_log_error);
+  var tsErr = Math.exp(ts.median_abs_log_error);
   var stats = [
     ['Watchlist', R.watchlist_size + '/' + R.watchlist_size, true],
     ['Board rows', fmtInt(R.board_size), false],
@@ -73,13 +84,14 @@
   $('backtest').textContent =
     'each live token scored by a model fitted without it: median error ×' + looErr.toFixed(2) +
     ' and ' + Math.round(loo.within_2x_share * 100) + '% of predictions within 2× of the real market cap, over ' +
-    loo.n + ' live tokens. (In-sample: ' + Math.round(bt.within_2x_share * 100) +
-    '% within 2× — the leave-one-out number is the honest one.) Against a ~' + spreadX +
+    loo.n + ' live tokens. 5-fold cross-validation agrees: median error ×' + cvErr.toFixed(2) +
+    ', ' + Math.round(cv.within_2x_share * 100) + '% within 2×. (In-sample: ' + Math.round(bt.within_2x_share * 100) +
+    '% within 2× — the out-of-sample numbers are the honest ones.) Against a ~' + spreadX +
     '× spread of live multiples, a 2× band is a hard test.';
   $('audit-note').textContent =
     R.audit.pre_token + ' records with no token were reviewed: ' + R.audit.rankable + ' rankable → ' +
-    R.audit.board + ' ranked, ' + R.audit.set_aside + ' set aside with a reason (wrapped, staked or bridged ' +
-    'products), ' + R.audit.excluded + ' excluded (exchange category or versioned names).';
+    R.audit.board + ' ranked, ' + R.audit.set_aside + ' set aside with a reason and a demoted value (wrapped, staked or bridged ' +
+    'products, priced off their size neighbours, never ranked), ' + R.audit.excluded + ' excluded (exchange category or versioned names).';
 
   // ---------------------------------------------------------------- research note + chart
   (function renderResearch() {
@@ -94,6 +106,12 @@
       return '<li><a href="#detail=' + esc(p.slug) + '">#' + p.rank + ' ' + esc(p.name) + '</a> — ' +
         fmtUSD(p.implied_value_usd) + '. ' + esc(p.reason) + '</li>';
     }).join('');
+    // The netted farms, aggregated live from the board: how many plans clear their own
+    // gas at the band's low end, the median net, and the cheapest break-even capital.
+    var nets = R.rows.map(function (r) { return r.farm_summary.net_low_usd; }).sort(function (a, b) { return a - b; });
+    var netPos = nets.filter(function (n) { return n > 0; }).length;
+    var medNet = nets[Math.floor(nets.length / 2)];
+    var minBreak = Math.min.apply(null, R.rows.map(function (r) { return r.farm_summary.breakeven_capital_usd; }));
     $('research-body').innerHTML =
       '<p>The board\u2019s ' + fmtInt(R.board_size) + ' rows hold ' + fmtUSD(res.board_tvl_usd) +
       ' of TVL; the ' + fmtInt(R.watchlist_size) + ' watchlist rows hold ' + fmtUSD(res.watchlist_tvl_usd) +
@@ -101,6 +119,15 @@
       '</b>; the weakest are <b>' + weak + '</b>. Multiples are what the market pays per dollar of ' +
       'TVL — a high multiple is evidence the market values that kind of protocol, not a promise.</p>' +
       '<p><b>Top picks.</b></p><ol class="picks">' + picks + '</ol>' +
+      '<p><b>A blind test.</b> Fitted on the oldest ' + ts.train_n + ' live tokens and graded on the newest ' +
+      ts.n + ' (' + ts.excluded_no_date + ' undated tokens held out of both sides), the model\u2019s median error is ×' +
+      tsErr.toFixed(2) + ' and ' + Math.round(ts.within_2x_share * 100) + '% land within 2× — worse than ' +
+      'leave-one-out, as a true forward test should be.</p>' +
+      '<p><b>Netted farms.</b> At the band\u2019s low end, assuming farmers share 10% of launch value ' +
+      'pro-rata by capital, ' + netPos + ' of ' + fmtInt(R.board_size) + ' farms clear their own gas; the median net is <b>' +
+      fmtSigned(medNet) + '</b> and the cheapest break-even capital is <b>$' + fmtInt(minBreak) + '</b>. Farming is a ' +
+      'size game at these multiples: the break-even capital beside each plan is the smallest position ' +
+      'that pays its own gas at the low end.</p>' +
       '<p><b>What this model cannot claim.</b> It does not predict whether or when any protocol issues ' +
       'a token, and an implied value is an estimate from comparables, not a price: the median ' +
       'leave-one-out error is ×' + looErr.toFixed(2) + ', which is why every row carries a value band. ' +
@@ -159,6 +186,8 @@
   var state = { tab: 'board', q: '', cat: '', chain: '', sort: 'rank', dir: 1 };
   var bySlug = {};
   R.rows.forEach(function (r) { bySlug[r.slug] = r; });
+  var byAside = {};
+  R.set_aside.forEach(function (p) { byAside[p.slug] = p; });
 
   /** The current tab's rows, normalized to one shape for the table. */
   function viewRows() {
@@ -171,7 +200,7 @@
     if (state.tab === 'aside') {
       return R.set_aside.map(function (p) {
         return { rank: null, slug: p.slug, name: p.name, category: p.category, chains: p.chains,
-          tvl: p.tvl_usd, chg: null, age: null, value: null, kind: 'aside', row: p };
+          tvl: p.tvl_usd, chg: null, age: null, value: p.demoted_value_usd, kind: 'aside', row: p };
       });
     }
     return R.rows.map(function (r) {
@@ -232,7 +261,7 @@
   }
 
   function renderHead() {
-    var last = state.tab === 'live' ? 'Market cap' : state.tab === 'aside' ? 'Reason set aside' : 'Implied value';
+    var last = state.tab === 'live' ? 'Market cap' : state.tab === 'aside' ? 'Demoted value' : 'Implied value';
     var heads = [
       ['rank', 'Rank'], ['name', 'Protocol'], ['category', 'Category'], ['chains', 'Chains'],
       ['tvl_usd', 'TVL'], ['change_7d', '7d'], ['age_days', 'Age'], ['implied_value_usd', last],
@@ -246,21 +275,35 @@
   /** The category summary strip: what the filtered category looks like as a group. */
   function renderCatSummary(rows) {
     var cs = $('catsum');
+    if (state.tab === 'aside') {
+      cs.innerHTML = '<b>Set aside — priced, never ranked.</b> These ' + rows.length +
+        ' rows are wrapped, staked or bridged products: a token that already trades in another form. ' +
+        'Each carries a demoted value — TVL × the median multiple of the 5 live tokens nearest by TVL, ' +
+        'no category premium, no blend — so the audit is complete without pretending a derivative is a launch.';
+      cs.hidden = false;
+      return;
+    }
     if (state.tab !== 'board' || !state.cat || rows.length === 0) { cs.hidden = true; return; }
     var tvl = 0;
     var lo = Infinity, hi = -Infinity;
+    var nets = [];
     rows.forEach(function (v) {
       tvl += v.tvl;
       if (v.value < lo) lo = v.value;
       if (v.value > hi) hi = v.value;
+      nets.push(v.row.farm_summary.net_low_usd);
     });
+    nets.sort(function (a, b) { return a - b; });
+    var medNet = nets[Math.floor(nets.length / 2)];
+    var netPos = nets.filter(function (n) { return n > 0; }).length;
     var catFit = fit.categories[state.cat];
     var mult = catFit
       ? 'category median multiple <b>' + fmtMult(catFit.median) + '</b> (n = ' + catFit.n + ' live' +
         (catFit.n < fit.min_peers ? ', below the 3-peer bar — these rows price off the global median' : '') + ')'
       : 'no live token in this category — these rows price off the global median';
     cs.innerHTML = '<b>' + esc(state.cat) + '</b> — ' + rows.length + ' protocol' + (rows.length === 1 ? '' : 's') +
-      ' · TVL <b>' + fmtUSD(tvl) + '</b> · ' + mult + ' · implied range <b>' + fmtUSD(lo) + ' – ' + fmtUSD(hi) + '</b>';
+      ' · TVL <b>' + fmtUSD(tvl) + '</b> · ' + mult + ' · implied range <b>' + fmtUSD(lo) + ' – ' + fmtUSD(hi) + '</b>' +
+      ' · farms netted at the band\u2019s low end: median <b>' + fmtSigned(medNet) + '</b>, ' + netPos + ' of ' + rows.length + ' clear their gas';
     cs.hidden = false;
   }
 
@@ -273,14 +316,16 @@
     $('empty').hidden = rows.length !== 0;
     $('rows').innerHTML = rows.map(function (v) {
       var badge = v.kind === 'board' && v.row.on_watchlist ? '<span class="badge">WATCHLIST</span>' : '';
+      if (v.kind === 'aside') badge = '<span class="badge demoted">DEMOTED</span>';
       var chg = v.chg == null ? '<td class="num">—</td>'
         : '<td class="num ' + (v.chg > 0 ? 'up' : v.chg < 0 ? 'down' : '') + '">' + fmtPct(v.chg) + '</td>';
-      var last = v.kind === 'aside'
-        ? '<td class="reason">' + esc(v.row.reason) + '</td>'
-        : '<td class="num"><b>' + fmtUSD(v.value) + '</b></td>';
+      var last = '<td class="num"><b>' + fmtUSD(v.value) + '</b></td>';
+      var sub = v.kind === 'aside'
+        ? '<br><span class="reason">' + esc(v.row.reason) + '</span>'
+        : '<br><span class="slug">' + esc(v.slug) + '</span>';
       return '<tr data-slug="' + esc(v.slug) + '" data-kind="' + v.kind + '">' +
         '<td class="num">' + (v.rank == null ? '—' : v.rank) + '</td>' +
-        '<td><span class="name">' + esc(v.name) + '</span>' + badge + '<br><span class="slug">' + esc(v.slug) + '</span></td>' +
+        '<td><span class="name">' + esc(v.name) + '</span>' + badge + sub + '</td>' +
         '<td>' + esc(v.category || '—') + '</td>' +
         '<td>' + esc(v.chains.slice(0, 3).join(', ') || '—') + (v.chains.length > 3 ? ' +' + (v.chains.length - 3) : '') + '</td>' +
         '<td class="num">' + fmtUSD(v.tvl) + '</td>' +
@@ -306,6 +351,7 @@
         (c.same_category ? ' <span style="color:#8b98a9">(same category)</span>' : ' <span style="color:#8b98a9">(nearest live token overall)</span>') + '</li>';
     }).join('');
     var f = r.farm_summary;
+    var netCls = f.net_low_usd > 0 ? 'up' : f.net_low_usd < 0 ? 'down' : '';
     $('detail-body').innerHTML =
       '<h2>' + esc(r.name) + '</h2>' +
       '<div class="slugline">rank #' + r.rank + ' · ' + esc(r.slug) + (r.on_watchlist ? ' · <span style="color:#fbbf24">ON THE WATCHLIST</span>' : '') + '</div>' +
@@ -324,9 +370,34 @@
       '<h2 style="margin-top:18px">Nearest live comparables</h2>' +
       '<ul class="comps">' + comps + '</ul>' +
       '<h2 style="margin-top:18px">Farm plan</h2>' +
-      '<div class="farm-econ">Farm economics — capital <b>$' + fmtInt(f.capital_usd) + '</b> · est. gas <b>$' + fmtInt(f.gas_usd) + '</b> · hold <b>' + f.hold_days + ' days</b> · setup <b>~' + f.setup_minutes + ' min</b></div>' +
+      '<div class="farm-econ">Farm economics — capital <b>$' + fmtInt(f.capital_usd) + '</b> · est. gas <b>$' + fmtInt(f.gas_usd) + '</b> · hold <b>' + f.hold_days + ' days</b> · setup <b>~' + f.setup_minutes + ' min</b>' +
+      '<br>Netted at the band\u2019s low end: gross <b>' + fmtGross(f.gross_low_usd) + '</b> − gas <b>$' + fmtInt(f.gas_usd) + '</b> = net <b class="' + netCls + '">' + fmtSigned(f.net_low_usd) + '</b>' +
+      ' · breaks even above <b>$' + fmtInt(f.breakeven_capital_usd) + '</b> of capital' +
+      ' <span style="color:#8b98a9">(assumes farmers share 10% of launch value, pro-rata by capital)</span></div>' +
       '<ol class="steps">' + r.farm_steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
       '<p class="reason">Implied value is this radar\u2019s own claim from the snapshot\u2019s figures, never a promise of a launch. The protocol records no token; its record may simply not carry one.</p>';
+    $('detail').hidden = false;
+    if (location.hash !== '#detail=' + slug) history.replaceState(null, '', '#detail=' + slug);
+  }
+  /** A set-aside row's detail: its demoted value, its size neighbours, and why it is not ranked. */
+  function openAsideDetail(slug) {
+    var p = byAside[slug];
+    if (!p) return;
+    var neigh = p.neighbours.map(function (n) {
+      return '<li><b>' + esc(n.slug) + '</b> — multiple ' + fmtMult(n.multiple) + '</li>';
+    }).join('');
+    $('detail-body').innerHTML =
+      '<h2>' + esc(p.name) + '</h2>' +
+      '<div class="slugline">' + esc(p.slug) + ' · <span style="color:#fbbf24">SET ASIDE — NOT RANKED</span></div>' +
+      '<p class="reason">' + esc(p.reason) + '</p>' +
+      '<table class="kv">' +
+      '<tr><td>TVL</td><td>' + fmtUSD(p.tvl_usd) + '</td></tr>' +
+      '<tr><td>Size-neighbour multiple</td><td>' + fmtMult(p.size_multiple) + ' <span style="color:#8b98a9">(median of the 5 live tokens nearest by TVL)</span></td></tr>' +
+      '<tr class="total"><td>Demoted value</td><td>' + fmtUSD(p.demoted_value_usd) + '</td></tr>' +
+      '</table>' +
+      '<h2 style="margin-top:18px">Size neighbours</h2>' +
+      '<ul class="comps">' + neigh + '</ul>' +
+      '<p class="reason">A demoted value is TVL × the size-neighbour multiple, times the same growth, maturity and chain factors the ranked rows use — no category premium, no blend. It is shown so the audit is complete; it is not a launch candidate, and it carries no farm plan.</p>';
     $('detail').hidden = false;
     if (location.hash !== '#detail=' + slug) history.replaceState(null, '', '#detail=' + slug);
   }
@@ -345,8 +416,10 @@
   });
   $('rows').addEventListener('click', function (e) {
     var tr = e.target.closest('tr[data-slug]');
-    if (!tr || tr.getAttribute('data-kind') !== 'board') return;
-    openDetail(tr.getAttribute('data-slug'));
+    if (!tr) return;
+    var kind = tr.getAttribute('data-kind');
+    if (kind === 'board') openDetail(tr.getAttribute('data-slug'));
+    else if (kind === 'aside') openAsideDetail(tr.getAttribute('data-slug'));
   });
   $('close-detail').addEventListener('click', closeDetail);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDetail(); });
@@ -371,7 +444,11 @@
   window.addEventListener('hashchange', function () {
     var hash = location.hash.replace(/^#/, '');
     var m = /(?:^|&)detail=([^&]*)/.exec(hash);
-    if (m) { openDetail(decodeURIComponent(m[1])); } else { closeDetail(); }
+    if (m) {
+      var slug = decodeURIComponent(m[1]);
+      if (bySlug[slug]) openDetail(slug);
+      else if (byAside[slug]) openAsideDetail(slug);
+    } else { closeDetail(); }
   });
   (function () {
     var hash = location.hash.replace(/^#/, '');
@@ -386,6 +463,9 @@
       $('cat').value = params.cat;
     }
     render();
-    if (params.detail) openDetail(params.detail);
+    if (params.detail) {
+      if (bySlug[params.detail]) openDetail(params.detail);
+      else if (byAside[params.detail]) openAsideDetail(params.detail);
+    }
   })();
 })();
