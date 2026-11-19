@@ -68,7 +68,41 @@ function copyFiles(from: string, to: string): string[] {
 }
 
 copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
-const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
+
+/** Copy screenshots to output, decoding base64 (.b64) files to binary images. */
+function copyScreenshots(from: string, to: string): string[] {
+  if (!existsSync(from)) return [];
+  mkdirSync(to, { recursive: true });
+  const copied: string[] = [];
+  for (const name of readdirSync(from)) {
+    if (name.startsWith('.')) continue;
+    const path = join(from, name);
+    if (!statSync(path).isFile()) continue;
+    // .b64 files hold base64-encoded images: decode to binary .jpg/.png
+    if (name.endsWith('.b64')) {
+      const baseName = name.slice(0, -4); // strip .b64
+      const b64 = readFileSync(path, 'utf8').trim();
+      const binary = Buffer.from(b64, 'base64');
+      writeFileSync(join(to, baseName), binary);
+      copied.push(baseName);
+    } else {
+      // Regular file: copy as-is (binary image or base64 text in .jpg)
+      const content = readFileSync(path);
+      // If the file contains base64 text (starts with /9j/ for JPEG), decode it
+      const text = content.toString('utf8', 0, 20);
+      if (text.startsWith('/9j/') || text.startsWith('iVBORw0KGgo')) {
+        const binary = Buffer.from(content.toString('utf8').trim(), 'base64');
+        writeFileSync(join(to, name), binary);
+      } else {
+        copyFileSync(path, join(to, name));
+      }
+      copied.push(name);
+    }
+  }
+  return copied;
+}
+
+const shots = copyScreenshots(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3) {
   process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`);
   process.exit(1);
