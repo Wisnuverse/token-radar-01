@@ -1,90 +1,15 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Launch Radar — pre-token protocols, ranked by implied value</title>
+<title>Token Radar — Pre-token protocols ranked by implied launch value</title>
+<meta name="description" content="Which pre-token protocol is worth farming next? Token Radar ranks every protocol DefiLlama tracks that records no token, by what its launch would be worth, with a farm plan for each.">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand">
-    <h1>TOKEN LAUNCH RADAR</h1>
-    <p class="sub">Protocols that record no token, ranked by what a launch would be worth — priced off the snapshot's own live tokens. Snapshot: DefiLlama protocols, as of <span id="asof"></span>.</p>
-  </div>
-  <div class="badges" id="badges"></div>
-</header>
-
-<section class="hero">
-  <div class="hero-left">
-    <h2><span id="boardcount"></span> protocols record no token. Here is what each launch would be worth — and what farming it costs.</h2>
-    <p class="total">Their launches imply <b id="totalimplied"></b> in total, priced like the <span id="livecount"></span> tokens that already trade. No name is hand-picked: one fitted model prices the page and the board.</p>
-    <div class="verdicts" id="verdicts"></div>
-    <p class="best" id="besthour"></p>
-    <p class="funnel" id="funnel"></p>
-  </div>
-  <div class="hero-mid">
-    <h2>How a launch is priced <span class="tag" id="modelver"></span></h2>
-    <p class="formula" id="formula"></p>
-    <table class="ladder" id="ladder"></table>
-    <p class="tsplit" id="tsplit"></p>
-  </div>
-  <div class="hero-right">
-    <h2>Traded tokens and the curve</h2>
-    <div class="chart" id="chart"></div>
-    <p class="chartnote" id="chartnote"></p>
-  </div>
-</section>
-
-<nav class="tabs" id="tabs">
-  <button data-tab="board" class="active">Pre-token board</button>
-  <button data-tab="live">Live tokens</button>
-  <button data-tab="aside">Set aside</button>
-</nav>
-
-<div class="controls">
-  <input id="q" type="search" placeholder="Search name or slug…" autocomplete="off">
-  <select id="cat" aria-label="Category filter"></select>
-  <select id="chain" aria-label="Chain filter"></select>
-  <select id="verdict" aria-label="Verdict filter">
-    <option value="">All verdicts</option>
-    <option value="ROBUST">ROBUST</option>
-    <option value="FARM">FARM</option>
-    <option value="THIN">THIN</option>
-    <option value="SKIP">SKIP</option>
-  </select>
-  <label class="checkline"><input id="hidelinked" type="checkbox"> Hide parent-linked</label>
-  <span class="count" id="count"></span>
-</div>
-
-<div class="catsum" id="catsum" hidden></div>
-
-<main>
-  <table id="board">
-    <thead><tr id="headrow"></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <p class="empty" id="empty" hidden>No protocol matches the filter.</p>
-</main>
-
-<section class="research" id="research">
-  <h2>Research note — what the snapshot says</h2>
-  <div id="research-body"></div>
-</section>
-
-<aside class="drawer" id="detail" hidden>
-  <button class="close" id="close-detail" aria-label="Close detail">✕</button>
-  <div id="detail-body"></div>
-</aside>
-
-<footer>
-  <p>Board rows: every watchlist protocol plus every other native pre-token protocol in the snapshot.
-  Live-token protocols are shown apart at their market's own values, never mixed into the ranking.
-  Set-aside rows are priced demoted off their size neighbours and never ranked. Farm plans are
-  derived from each protocol's own category, chains, TVL and age, and netted at a $1,000 ticket:
-  10% of launch value pro-rata by capital, minus gas and a 4% T-bill opportunity cost.</p>
-</footer>
-
+<a class="skip" href="#board">Skip to the board</a>
+<main id="board" tabindex="-1" aria-busy="true"></main>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>
