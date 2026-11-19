@@ -1,6 +1,10 @@
 # Token Radar — Pre-token protocols ranked by implied launch value
 
-A token launch radar for make.fun's `token-radar-01` bounty. It reads a sealed snapshot of every protocol DefiLlama tracks, finds the ones that record no token, ranks them by what their launch would be worth, and hands in a web dashboard with a farm plan for each.
+[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/Wisnuverse/token-radar-01/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/Wisnuverse/token-radar-01/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+
+A token launch radar for [make.fun's `token-radar-01` bounty](https://make.fun/bounty/token-radar-01). It reads a sealed snapshot of every protocol DefiLlama tracks, finds the ones that record no token, ranks them by what their launch would be worth, and hands in a web dashboard with a farm plan for each.
 
 ## What it does
 
